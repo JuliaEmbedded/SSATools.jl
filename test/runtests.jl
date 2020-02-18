@@ -1,5 +1,5 @@
 using SSATools
-using Test
+using Test, LightGraphs
 
 @testset "SSATools" begin
 
@@ -61,5 +61,46 @@ using Test
 
         @test f3f(6) == 6
 
+    end
+
+    @testset "Control Flow Graph" begin
+
+        function foo_maths(x::Int64)
+                a = x^6 + 3x^3
+                if a % 3 == 0
+                        a -= (5x^2 - x + 512)
+                else
+                        a += (5x^2 - x + 512)
+                end
+
+        end
+
+        fm_tir = code_typed(foo_maths, Tuple{Int64})[1]
+        fm_cfg = SSATools.get_cfg(fm_tir)
+        fm_cfg_v = LightGraphs.SimpleDiGraph(3)
+        LightGraphs.add_edge!(fm_cfg_v, 1, 2)
+        LightGraphs.add_edge!(fm_cfg_v, 1, 3)
+
+        @test fm_cfg == fm_cfg_v
+
+        function jpow(x::Int64, n::Int64) #basic power function
+                r = 1
+                while n > 0
+                        n -= 1
+                        r *= x
+                end
+                return r
+        end
+
+        jp_tir = code_typed(jpow, Tuple{Int64, Int64})[1]
+        jp_cfg = SSATools.get_cfg(jp_tir)
+
+        jp_cfg_v = LightGraphs.SimpleDiGraph(4)
+        LightGraphs.add_edge!(jp_cfg_v, 1, 2)
+        LightGraphs.add_edge!(jp_cfg_v, 2, 3)
+        LightGraphs.add_edge!(jp_cfg_v, 3, 2)
+        LightGraphs.add_edge!(jp_cfg_v, 2, 4)
+
+        @test jp_cfg == jp_cfg_v
     end
 end

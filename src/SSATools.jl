@@ -5,12 +5,12 @@ module SSATools
     #delete
     #replace
     #function walking
-    #turn that back in to a "function" that can be evaluated
+    #turn that back in to an anon function that can be evaluated
 
-export ci_to_f
+export ci_to_f, get_cfg
 
 using LightGraphs, MetaGraphs, LinearAlgebra, MacroTools #,Gadfly, GraphPlot
-using Core.Compiler: CodeInfo , SlotNumber
+using Core.Compiler: CodeInfo, SlotNumber
 
 function globref_to_func(g::GlobalRef)
     func_str = repr(g)
@@ -322,7 +322,7 @@ function rpl_phinodes(ci_og::CodeInfo)
     for line_i in phi_list
         ci_delete!(ci, line_i)
     end
-
+    slots!(ci)
     return ci
 end
 
@@ -340,7 +340,7 @@ function ci_to_f(ci_pair::Pair, nargs::Int64)
     end
 
     pnl = [isa(line, Core.PhiNode) for line in ci_pair[1].code]
-    ci_eval = (true in pnl) ? slots!(rpl_phinodes(ci_eval)) : ci_eval
+    ci_eval = (true in pnl) ? rpl_phinodes(ci_eval) : ci_eval
 
     if isa(ci_eval.ssavaluetypes, Array)
         ci_eval.ssavaluetypes = length(ci_eval.ssavaluetypes)
@@ -362,5 +362,21 @@ function ci_to_f(ci::CodeInfo, nargs::Int64)
         return $ci_eval
     end
 end
+
+
+#graph tools
+get_cfg(ci_p::Pair) = get_cfg(ci_p[1]::CodeInfo)
+
+function get_cfg(ci::CodeInfo)
+    ci_inf = Core.Compiler.inflate_ir(ci)
+    cfg = LightGraphs.SimpleDiGraph(length(ci_inf.cfg.blocks))
+
+    for (block_num, block ) in enumerate(ci_inf.cfg.blocks)
+        map(x -> LightGraphs.add_edge!(cfg, block_num, x), block.succs)
+    end
+
+    return cfg
+end
+
 
 end # module
