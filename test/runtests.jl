@@ -76,7 +76,7 @@ using Test, LightGraphs
         end
 
         fm_tir = code_typed(foo_maths, Tuple{Int64})[1]
-        fm_cfg = SSATools.get_cfg(fm_tir)
+        fm_cfg = SSATools.disp_cfg(fm_tir)
         fm_cfg_v = LightGraphs.SimpleDiGraph(3)
         LightGraphs.add_edge!(fm_cfg_v, 1, 2)
         LightGraphs.add_edge!(fm_cfg_v, 1, 3)
@@ -93,7 +93,7 @@ using Test, LightGraphs
         end
 
         jp_tir = code_typed(jpow, Tuple{Int64, Int64})[1]
-        jp_cfg = SSATools.get_cfg(jp_tir)
+        jp_cfg = SSATools.disp_cfg(jp_tir)
 
         jp_cfg_v = LightGraphs.SimpleDiGraph(4)
         LightGraphs.add_edge!(jp_cfg_v, 1, 2)
@@ -102,5 +102,9 @@ using Test, LightGraphs
         LightGraphs.add_edge!(jp_cfg_v, 2, 4)
 
         @test jp_cfg == jp_cfg_v
+    end
+
+    @testset "Control Data Flow Graph" begin
+
     end
 end

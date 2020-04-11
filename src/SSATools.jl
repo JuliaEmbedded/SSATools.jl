@@ -7,7 +7,7 @@ module SSATools
     #function walking
     #turn that back in to an anon function that can be evaluated
 
-export ci_to_f, get_cfg
+export ci_to_f, disp_cfg
 
 using LightGraphs, MetaGraphs, LinearAlgebra, MacroTools #,Gadfly, GraphPlot
 using Core.Compiler: CodeInfo, SlotNumber
@@ -364,10 +364,10 @@ function ci_to_f(ci::CodeInfo, nargs::Int64)
 end
 
 
-#graph tools
-get_cfg(ci_p::Pair) = get_cfg(ci_p[1]::CodeInfo)
+#graph visualisation tools
+disp_cfg(ci_p::Pair) = disp_cfg(ci_p[1]::CodeInfo)
 
-function get_cfg(ci::CodeInfo)
+function disp_cfg(ci::CodeInfo)
     ci_inf = Core.Compiler.inflate_ir(ci)
     cfg = LightGraphs.SimpleDiGraph(length(ci_inf.cfg.blocks))
 
