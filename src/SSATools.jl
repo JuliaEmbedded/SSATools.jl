@@ -378,5 +378,216 @@ function disp_cfg(ci::CodeInfo)
     return cfg
 end
 
+function disp_cdfg(cdfg::CDFG)
+    disp_cdfg = SimpleDiGraph(length(cdfg.nodes))
+
+    for (nn, node) in enumerate(cdfg.nodes)
+        map(x -> LightGraphs.add_edge!(disp_cdfg, x, nn), node.dataPreds[1])
+        map(x -> LightGraphs.add_edge!(disp_cdfg, x, nn), node.ctrlPreds)
+    end
+
+    return disp_cdfg
+end
+
+#CDFGArg struct - contains the arguments to a function
+struct CDFGArg
+    name::Symbol
+    slotNum::Int
+    type::DataType
+
+    dataSuccs::Vector{Int} # [ssa val]
+    ctrlSuccs::Vector{Int} #not sure how helpful this info is in its current state, might need to pull from CFG instead
+end
+
+#CDFGArg init - successors are not known at this point
+function CDFGArg(name::Symbol, slotNum::Int, type::DataType)
+    dataSuccs = Int[]
+    ctrlSuccs = Int[]
+    return CDFGArg(name, slotNum, type, dataSuccs, ctrlSuccs)
+end
+
+struct CDFGNode
+    op::Any #narrow down the type later - define custom op type
+    bb::Int #basic block number
+    type::DataType
+
+    literals::Array{Array{T,1} where T, 1} # [const value, type, position] good to include any constant values here - to be expanded in dot notation
+    dataPreds::Array{Array{T,1} where T, 1} # [ssa val (int), type, position]
+    dataSuccs::Vector{Int} # [ssa val] - may need to add position if there are multiple outputs
+    #not sure how helpful this info is in its current state, might need to pull from CFG instead
+    ctrlPreds::Vector{Int} #control info, basic blocks
+    ctrlSuccs::Vector{Int}
+end
+
+#CDFG node constructors - successors are sorted when constructing the full CDFG
+function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array{Any, 1}, slottypes::Array{Any, 1}) #this includes gotoifnot, invokes, error throws etc. using slottyes might be inefficient for splats
+    #vectors for links
+    op= nothing
+    bb= bbnum
+    lits=[[],[],[]]
+    dp=[[],[],[]]
+    ds=Int[]
+    cp=[]
+    cs=[]
+
+    if line.head == :gotoifnot
+        op = line.head
+        if isa(line.args[1], Core.SSAValue) # this is the var for the conditional
+            #line.args[1] = (line.args[1].id >= pos) ? Core.SSAValue(line.args[1].id + 1) : line.args[1]
+            push!(dp[1], line.args[1].id)
+            push!(dp[2], ssatypes[line.args[1].id])
+            push!(dp[3], 1)
+        elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
+            push!(lits[1], arg)
+            push!(lits[2], slottypes[arg.id])
+            push!(lits[3], 1)
+        else
+            error("Unexpected data dependency for gotoifnot node")
+        end
+        #this is the target line to branch to, add to successor? control or data?
+        #push!(cs, line.args[2])
+        #line to branch to line.args[2] just an int
+    elseif line.head == :invoke #nuke invoke nodes (collapse them to normal calls)
+        op = line.args[2]
+        for (arg_n, arg) in enumerate(line.args)
+            #this should ignore the first 2 args
+            if isa(arg, Core.SSAValue)
+                push!(dp[1], arg.id)
+                push!(dp[2], ssatypes[arg.id])
+                push!(dp[3], arg_n-2)
+            elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
+                push!(lits[1], arg) #copy just incase
+                push!(lits[2], slottypes[arg.id])
+                push!(lits[3], arg_n-2)
+            elseif !isa(arg, Core.GlobalRef) # this distinction won't work for weird meta-programs
+                push!(lits[1], arg) #copy just incase
+                push!(lits[2], typeof(arg))
+                push!(lits[3], arg_n-2)
+            end
+        end
+    elseif line.head == :return
+        op = line.head
+        if isa(line.args[1], Core.SSAValue)
+            push!(dp[1], line.args[1].id)
+            push!(dp[2], ssatypes[line.args[1].id])
+            push!(dp[3], 1)
+        elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
+            push!(lits[1], arg) #copy just incase
+            push!(lits[2], slottypes[arg.id])
+            push!(lits[3], 1)
+        elseif !isa(arg, Core.GlobalRef)
+            push!(lits[1], arg) #copy just incase
+            push!(lits[2], typeof(arg))
+            push!(lits[3], 1)
+        end
+
+    elseif line.head == :call || line.head == :foreigncall
+        op = line.args[1]
+        for (arg_n, arg) in enumerate(line.args)
+            if isa(arg, Core.SSAValue)
+                push!(dp[1], arg.id)
+                push!(dp[2], ssatypes[arg.id])
+                push!(dp[3], arg_n-1)
+            elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
+                push!(lits[1], arg) #copy just incase
+                push!(lits[2], slottypes[arg.id])
+                push!(lits[3], arg_n-1)
+            elseif !isa(arg, Core.GlobalRef)
+                push!(lits[1], arg) #copy just incase
+                push!(lits[2], typeof(arg))
+                push!(lits[3], arg_n-1)
+            end
+        end
+    else
+        #unknown experssion type
+        error("CDFG has unknown expression type: ", line.head)
+    end
+    return CDFGNode(op, bb, ssatypes[linenum], lits, dp, ds, cp, cs)
+end
+
+function CDFGNode(line::Core.PhiNode, linenum::Int, bbnum::Int64, ssatypes::Array{Any, 1}, slottypes::Array{Any, 1})
+    op=:phi
+    bb= bbnum
+    lits=[[],[],[]]
+    dp=[[],[],[]]
+    ds=Int[]
+    cp=[]
+    cs=[]
+
+    for bb_end in line.edges #end of the basic blocks (last ssa val)
+        push!(cp, bb_end)
+    end
+    for (val_n,val) in enumerate(line.values)
+        if isa(val, Core.SSAValue)
+            push!(dp[1], val.id)
+            push!(dp[2], ssatypes[val.id])
+            push!(dp[3], val_n)
+        elseif isa(val, Core.SlotNumber) #add slot number references (inputs to function)
+            push!(lits[1], val) #copy just incase
+            push!(lits[2], slottypes[val.id])
+            push!(lits[3], val_n)
+        elseif !isa(val, Core.GlobalRef)
+            push!(lits[1], val) #copy just incase
+            push!(lits[2], typeof(val))
+            push!(lits[3], val_n)
+        end
+    end
+    return CDFGNode(op, bb, ssatypes[linenum], lits, dp, ds, cp, cs)
+end
+
+function CDFGNode(line::Core.GotoNode, linenum::Int, bbnum::Int64, ssatypes::Array{Any, 1}, slottypes::Array{Any, 1})
+    op=:goto
+    bb= bbnum
+    lits=[[],[],[]]
+    dp=[[],[],[]]
+    ds=Int[]
+    cp=[]
+    cs=[]#[line.label]
+    return CDFGNode(op, bb, ssatypes[linenum], lits, dp, ds, cp, cs)
+end
+
+#CDFG type - contains the function args, the nodes of the CDFG (each code line from )
+struct CDFG
+    args::Vector{CDFGArg}
+    nodes::Vector{CDFGNode}
+    cfg::Core.Compiler.CFG
+end
+
+#helper function to get the bb number
+function get_bb_num(cfg::Core.Compiler.CFG, ssavalue::Int64)
+    for (b_num, block) in enumerate(cfg.blocks)
+        if ssavalue in block.stmts
+            return b_num
+        end
+    end
+    error("The ssavalue provided is not in a basic block")
+end
+
+#actual function to produce the CDFG
+function get_cdfg(ci::CodeInfo)
+    ci_inf = Core.Compiler.inflate_ir(ci)
+
+    args = CDFGArg[CDFGArg(ci.slotnames[arg_num], arg_num, ci.slottypes[arg_num]) for arg_num in 2:length(ci_inf.argtypes)] #init arg nodes
+    nodes = CDFGNode[CDFGNode(line, l_num, get_bb_num(ci_inf.cfg, l_num), ci.ssavaluetypes, ci.slottypes) for (l_num, line) in enumerate(ci.code)] #gen initial pred connections
+
+    for (nn,node) in enumerate(nodes) #update missing successors
+        for dpv in node.dataPreds[1] # update the succs of other blocks
+            push!(nodes[dpv].dataSuccs, nn)
+        end
+
+        for cpv in node.ctrlPreds
+            push!(nodes[cpv].ctrlSuccs, nn)
+        end
+
+        for (lit_num, lit) in enumerate(node.literals[1]) #sort out the function args
+            if isa(lit, Core.SlotNumber)
+                push!(args[lit.id-1].dataSuccs, nn)
+            end
+        end
+        #might need to add control link updates here
+    end
+
+    return CDFG(args, nodes, ci_inf.cfg)
+end
 
 end # module
