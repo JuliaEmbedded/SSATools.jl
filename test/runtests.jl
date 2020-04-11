@@ -106,5 +106,27 @@ using Test, LightGraphs
 
     @testset "Control Data Flow Graph" begin
 
+            #=test plan:
+                test of over-arching CDFG production
+                        test with multiply func
+                        test with if_else func
+                        test with "foo_maths"
+                        test with "pow"
+                        test with mv mult - not sure if this should be broken down functionally 
+                        test with mm mult - not sure if this should be broken down functionally
+
+                test of node creation:
+                        test expression types
+                                invoke
+                                call
+                                foreigncall
+                                return
+                                gotoifnot
+                        test phi node
+                        test goto
+
+                not much point testing the graph display atm since its too basic
+            =#
+
     end
 end
