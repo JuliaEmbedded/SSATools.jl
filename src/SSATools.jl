@@ -7,7 +7,7 @@ module SSATools
     #function walking
     #turn that back in to an anon function that can be evaluated
 
-export ci_to_f, disp_cfg
+export ci_to_f, disp_cfg, CDFG, get_cdfg
 
 using LightGraphs, MetaGraphs, LinearAlgebra, MacroTools #,Gadfly, GraphPlot
 using Core.Compiler: CodeInfo, SlotNumber
@@ -363,32 +363,6 @@ function ci_to_f(ci::CodeInfo, nargs::Int64)
     end
 end
 
-
-#graph visualisation tools
-disp_cfg(ci_p::Pair) = disp_cfg(ci_p[1]::CodeInfo)
-
-function disp_cfg(ci::CodeInfo)
-    ci_inf = Core.Compiler.inflate_ir(ci)
-    cfg = LightGraphs.SimpleDiGraph(length(ci_inf.cfg.blocks))
-
-    for (block_num, block ) in enumerate(ci_inf.cfg.blocks)
-        map(x -> LightGraphs.add_edge!(cfg, block_num, x), block.succs)
-    end
-
-    return cfg
-end
-
-function disp_cdfg(cdfg::CDFG)
-    disp_cdfg = SimpleDiGraph(length(cdfg.nodes))
-
-    for (nn, node) in enumerate(cdfg.nodes)
-        map(x -> LightGraphs.add_edge!(disp_cdfg, x, nn), node.dataPreds[1])
-        map(x -> LightGraphs.add_edge!(disp_cdfg, x, nn), node.ctrlPreds)
-    end
-
-    return disp_cdfg
-end
-
 #CDFGArg struct - contains the arguments to a function
 struct CDFGArg
     name::Symbol
@@ -588,6 +562,31 @@ function get_cdfg(ci::CodeInfo)
     end
 
     return CDFG(args, nodes, ci_inf.cfg)
+end
+
+#graph visualisation tools
+disp_cfg(ci_p::Pair) = disp_cfg(ci_p[1]::CodeInfo)
+
+function disp_cfg(ci::CodeInfo)
+    ci_inf = Core.Compiler.inflate_ir(ci)
+    cfg = LightGraphs.SimpleDiGraph(length(ci_inf.cfg.blocks))
+
+    for (block_num, block ) in enumerate(ci_inf.cfg.blocks)
+        map(x -> LightGraphs.add_edge!(cfg, block_num, x), block.succs)
+    end
+
+    return cfg
+end
+
+function disp_cdfg(cdfg::CDFG)
+    disp_cdfg = SimpleDiGraph(length(cdfg.nodes))
+
+    for (nn, node) in enumerate(cdfg.nodes)
+        map(x -> LightGraphs.add_edge!(disp_cdfg, x, nn), node.dataPreds[1])
+        map(x -> LightGraphs.add_edge!(disp_cdfg, x, nn), node.ctrlPreds)
+    end
+
+    return disp_cdfg
 end
 
 end # module
