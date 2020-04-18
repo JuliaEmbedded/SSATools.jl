@@ -406,10 +406,10 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
         op = line.head
         if isa(line.args[1], Core.SSAValue) || isa(line.args[1], Core.SlotNumber)# this is the var for the conditional
             #line.args[1] = (line.args[1].id >= pos) ? Core.SSAValue(line.args[1].id + 1) : line.args[1]
-            push!(dp[1], (isa(line.args[1], Core.SlotNumber ? line.args : line.args[1].id)
-            push!(dp[2], (isa(line.args[1], Core.SlotNumber ? slottypes[line.args[1].id] : ssatypes[line.args[1].id]))
+            push!(dp[1], (isa(line.args[1]), Core.SlotNumber ? line.args : line.args[1].id))
+            push!(dp[2], (isa(line.args[1]), Core.SlotNumber ? slottypes[line.args[1].id] : ssatypes[line.args[1].id]))
             push!(dp[3], 1)
-            push!(dp[4], (isa(line.args[1], Core.SlotNumber))
+            push!(dp[4], (isa(line.args[1]), Core.SlotNumber))
         else #literals don't make sense for this node
             error("Unexpected data dependency for gotoifnot node")
         end
@@ -419,7 +419,7 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
     elseif line.head == :invoke #nuke invoke nodes (collapse them to normal calls)
         op = line.args[2]
         try
-            for (arg_n, arg) in enumerate(line.args[3:])
+            for (arg_n, arg) in enumerate(line.args[3:end])
                 #this should ignore the first 2 args
                 push!(dp[1], (isa(arg, Core.SSAValue) ? arg.id : arg))
                 push!(dp[3], arg_n)
@@ -456,8 +456,8 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
     elseif line.head == :call || line.head == :foreigncall
         op = line.args[1]
         try
-            for (arg_n, arg) in enumerate(line.args[2:])
-                #this should ignore the first 2 args
+            for (arg_n, arg) in enumerate(line.args[2:end])
+                #this should ignore the first arg
                 push!(dp[1], (isa(arg, Core.SSAValue) ? arg.id : arg))
                 push!(dp[3], arg_n)
                 push!(dp[4], !isa(arg, Core.SSAValue))
