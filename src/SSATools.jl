@@ -427,16 +427,16 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
                 if isa(arg, Core.SSAValue)
                     push!(dp[2], ssatypes[arg.id])
                 elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
-                    push!(lits[2], slottypes[arg.id])
+                    push!(dp[2], slottypes[arg.id])
                 else #literal args - potentially dangerous to include everything else
-                    push!(lits[2], typeof(arg))
+                    push!(dp[2], typeof(arg))
                 end
             end
         catch err
             if isa(err, Core.BoundsError)
                 println("Invoke node has no args, this is fine.")
             else
-                return err
+                error(err)
             end
         end
 
@@ -448,9 +448,9 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
         if isa(line.args[1], Core.SSAValue)
             push!(dp[2], ssatypes[line.args[1].id])
         elseif isa(line.args[1], Core.SlotNumber) #add slot number references (inputs to function)
-            push!(lits[2], slottypes[line.args[1].id])
+            push!(dp[2], slottypes[line.args[1].id])
         else #literal args - potentially dangerous to include everything else
-            push!(lits[2], typeof(line.args[1]))
+            push!(dp[2], typeof(line.args[1]))
         end
 
     elseif line.head == :call || line.head == :foreigncall
@@ -464,16 +464,16 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
                 if isa(arg, Core.SSAValue)
                     push!(dp[2], ssatypes[arg.id])
                 elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
-                    push!(lits[2], slottypes[arg.id])
+                    push!(dp[2], slottypes[arg.id])
                 else #literal args - potentially dangerous to include everything else
-                    push!(lits[2], typeof(arg))
+                    push!(dp[2], typeof(arg))
                 end
             end
         catch err
             if isa(err, Core.BoundsError)
-                println("Invoke node has no args, this is fine.")
+                println("Call/foreigncall node has no args, this is fine.")
             else
-                return err
+                error(err)
             end
         end
     else
@@ -502,9 +502,9 @@ function CDFGNode(line::Core.PhiNode, linenum::Int, bbnum::Int64, ssatypes::Arra
         if isa(val, Core.SSAValue)
             push!(dp[2], ssatypes[val.id])
         elseif isa(val, Core.SlotNumber) #add slot number references (inputs to function)
-            push!(lits[2], slottypes[val.id])
+            push!(dp[2], slottypes[val.id])
         else #literal vals - potentially dangerous to include everything else
-            push!(lits[2], typeof(val))
+            push!(dp[2], typeof(val))
         end
     end
 
