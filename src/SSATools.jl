@@ -385,8 +385,7 @@ struct CDFGNode
     bb::Int #basic block number
     type::DataType
 
-    literals::Array{Array{T,1} where T, 1} # [const value, type, position] good to include any constant values here - to be expanded in dot notation
-    dataPreds::Array{Array{T,1} where T, 1} # [ssa val (int), type, position]
+    dataPreds::Array{Array{T,1} where T, 1} # [ssa val (int) or constant, type, position, literal(boolean)]
     dataSuccs::Vector{Int} # [ssa val] - may need to add position if there are multiple outputs
     #not sure how helpful this info is in its current state, might need to pull from CFG instead
     ctrlPreds::Vector{Int} #control info, basic blocks
@@ -398,24 +397,20 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
     #vectors for links
     op= nothing
     bb= bbnum
-    lits=[[],[],[]]
-    dp=[[],[],[]]
+    dp=[[],[],[],[]]
     ds=Int[]
     cp=[]
     cs=[]
 
     if line.head == :gotoifnot
         op = line.head
-        if isa(line.args[1], Core.SSAValue) # this is the var for the conditional
+        if isa(line.args[1], Core.SSAValue) || isa(line.args[1], Core.SlotNumber)# this is the var for the conditional
             #line.args[1] = (line.args[1].id >= pos) ? Core.SSAValue(line.args[1].id + 1) : line.args[1]
-            push!(dp[1], line.args[1].id)
-            push!(dp[2], ssatypes[line.args[1].id])
+            push!(dp[1], (isa(line.args[1], Core.SlotNumber ? line.args : line.args[1].id)
+            push!(dp[2], (isa(line.args[1], Core.SlotNumber ? slottypes[line.args[1].id] : ssatypes[line.args[1].id]))
             push!(dp[3], 1)
-        elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
-            push!(lits[1], arg)
-            push!(lits[2], slottypes[arg.id])
-            push!(lits[3], 1)
-        else
+            push!(dp[4], (isa(line.args[1], Core.SlotNumber))
+        else #literals don't make sense for this node
             error("Unexpected data dependency for gotoifnot node")
         end
         #this is the target line to branch to, add to successor? control or data?
@@ -423,67 +418,75 @@ function CDFGNode(line::Core.Expr, linenum::Int64, bbnum::Int64, ssatypes::Array
         #line to branch to line.args[2] just an int
     elseif line.head == :invoke #nuke invoke nodes (collapse them to normal calls)
         op = line.args[2]
-        for (arg_n, arg) in enumerate(line.args)
-            #this should ignore the first 2 args
-            if isa(arg, Core.SSAValue)
-                push!(dp[1], arg.id)
-                push!(dp[2], ssatypes[arg.id])
-                push!(dp[3], arg_n-2)
-            elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
-                push!(lits[1], arg) #copy just incase
-                push!(lits[2], slottypes[arg.id])
-                push!(lits[3], arg_n-2)
-            elseif !isa(arg, Core.GlobalRef) # this distinction won't work for weird meta-programs
-                push!(lits[1], arg) #copy just incase
-                push!(lits[2], typeof(arg))
-                push!(lits[3], arg_n-2)
+        try
+            for (arg_n, arg) in enumerate(line.args[3:])
+                #this should ignore the first 2 args
+                push!(dp[1], (isa(arg, Core.SSAValue) ? arg.id : arg))
+                push!(dp[3], arg_n)
+                push!(dp[4], !isa(arg, Core.SSAValue))
+                if isa(arg, Core.SSAValue)
+                    push!(dp[2], ssatypes[arg.id])
+                elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
+                    push!(lits[2], slottypes[arg.id])
+                else #literal args - potentially dangerous to include everything else
+                    push!(lits[2], typeof(arg))
+                end
+            end
+        catch err
+            if isa(err, Core.BoundsError)
+                println("Invoke node has no args, this is fine.")
+            else
+                return err
             end
         end
+
     elseif line.head == :return
         op = line.head
+        push!(dp[1], (isa(line.args[1], Core.SSAValue) ? line.args[1].id : line.args[1]))
+        push!(dp[3], 1)
+        push!(dp[4], !isa(line.args[1], Core.SSAValue))
         if isa(line.args[1], Core.SSAValue)
-            push!(dp[1], line.args[1].id)
             push!(dp[2], ssatypes[line.args[1].id])
-            push!(dp[3], 1)
-        elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
-            push!(lits[1], arg) #copy just incase
-            push!(lits[2], slottypes[arg.id])
-            push!(lits[3], 1)
-        elseif !isa(arg, Core.GlobalRef)
-            push!(lits[1], arg) #copy just incase
-            push!(lits[2], typeof(arg))
-            push!(lits[3], 1)
+        elseif isa(line.args[1], Core.SlotNumber) #add slot number references (inputs to function)
+            push!(lits[2], slottypes[line.args[1].id])
+        else #literal args - potentially dangerous to include everything else
+            push!(lits[2], typeof(line.args[1]))
         end
 
     elseif line.head == :call || line.head == :foreigncall
         op = line.args[1]
-        for (arg_n, arg) in enumerate(line.args)
-            if isa(arg, Core.SSAValue)
-                push!(dp[1], arg.id)
-                push!(dp[2], ssatypes[arg.id])
-                push!(dp[3], arg_n-1)
-            elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
-                push!(lits[1], arg) #copy just incase
-                push!(lits[2], slottypes[arg.id])
-                push!(lits[3], arg_n-1)
-            elseif !isa(arg, Core.GlobalRef)
-                push!(lits[1], arg) #copy just incase
-                push!(lits[2], typeof(arg))
-                push!(lits[3], arg_n-1)
+        try
+            for (arg_n, arg) in enumerate(line.args[2:])
+                #this should ignore the first 2 args
+                push!(dp[1], (isa(arg, Core.SSAValue) ? arg.id : arg))
+                push!(dp[3], arg_n)
+                push!(dp[4], !isa(arg, Core.SSAValue))
+                if isa(arg, Core.SSAValue)
+                    push!(dp[2], ssatypes[arg.id])
+                elseif isa(arg, Core.SlotNumber) #add slot number references (inputs to function)
+                    push!(lits[2], slottypes[arg.id])
+                else #literal args - potentially dangerous to include everything else
+                    push!(lits[2], typeof(arg))
+                end
+            end
+        catch err
+            if isa(err, Core.BoundsError)
+                println("Invoke node has no args, this is fine.")
+            else
+                return err
             end
         end
     else
         #unknown experssion type
         error("CDFG has unknown expression type: ", line.head)
     end
-    return CDFGNode(op, bb, ssatypes[linenum], lits, dp, ds, cp, cs)
+    return CDFGNode(op, bb, ssatypes[linenum], dp, ds, cp, cs)
 end
 
 function CDFGNode(line::Core.PhiNode, linenum::Int, bbnum::Int64, ssatypes::Array{Any, 1}, slottypes::Array{Any, 1})
     op=:phi
     bb= bbnum
-    lits=[[],[],[]]
-    dp=[[],[],[]]
+    dp=[[],[],[],[]]
     ds=Int[]
     cp=[]
     cs=[]
@@ -491,7 +494,21 @@ function CDFGNode(line::Core.PhiNode, linenum::Int, bbnum::Int64, ssatypes::Arra
     for bb_end in line.edges #end of the basic blocks (last ssa val)
         push!(cp, bb_end)
     end
-    for (val_n,val) in enumerate(line.values)
+
+    for (val_n, val) in enumerate(line.values)
+        push!(dp[1], (isa(val, Core.SSAValue) ? val.id : val))
+        push!(dp[3], val_n)
+        push!(dp[4], !isa(val, Core.SSAValue))
+        if isa(val, Core.SSAValue)
+            push!(dp[2], ssatypes[val.id])
+        elseif isa(val, Core.SlotNumber) #add slot number references (inputs to function)
+            push!(lits[2], slottypes[val.id])
+        else #literal vals - potentially dangerous to include everything else
+            push!(lits[2], typeof(val))
+        end
+    end
+
+    #=for (val_n,val) in enumerate(line.values)
         if isa(val, Core.SSAValue)
             push!(dp[1], val.id)
             push!(dp[2], ssatypes[val.id])
@@ -500,24 +517,24 @@ function CDFGNode(line::Core.PhiNode, linenum::Int, bbnum::Int64, ssatypes::Arra
             push!(lits[1], val) #copy just incase
             push!(lits[2], slottypes[val.id])
             push!(lits[3], val_n)
+
         elseif !isa(val, Core.GlobalRef)
             push!(lits[1], val) #copy just incase
             push!(lits[2], typeof(val))
             push!(lits[3], val_n)
         end
-    end
-    return CDFGNode(op, bb, ssatypes[linenum], lits, dp, ds, cp, cs)
+    end=#
+    return CDFGNode(op, bb, ssatypes[linenum], dp, ds, cp, cs)
 end
 
 function CDFGNode(line::Core.GotoNode, linenum::Int, bbnum::Int64, ssatypes::Array{Any, 1}, slottypes::Array{Any, 1})
     op=:goto
     bb= bbnum
-    lits=[[],[],[]]
-    dp=[[],[],[]]
+    dp=[[],[],[],[]]
     ds=Int[]
     cp=[]
     cs=[]#[line.label]
-    return CDFGNode(op, bb, ssatypes[linenum], lits, dp, ds, cp, cs)
+    return CDFGNode(op, bb, ssatypes[linenum], dp, ds, cp, cs)
 end
 
 #CDFG type - contains the function args, the nodes of the CDFG (each code line from )
@@ -545,18 +562,18 @@ function get_cdfg(ci::CodeInfo)
     nodes = CDFGNode[CDFGNode(line, l_num, get_bb_num(ci_inf.cfg, l_num), ci.ssavaluetypes, ci.slottypes) for (l_num, line) in enumerate(ci.code)] #gen initial pred connections
 
     for (nn,node) in enumerate(nodes) #update missing successors
-        for dpv in node.dataPreds[1] # update the succs of other blocks
-            push!(nodes[dpv].dataSuccs, nn)
+        for (dpv, lit_bool) in zip(node.dataPreds[1], node.dataPreds[4]) # update the succs of other blocks
+            if lit_bool
+                if isa(dpv, Core.SlotNumber)
+                    push!(args[dpv.id-1].dataSuccs, nn)
+                end
+            else
+                push!(nodes[dpv].dataSuccs, nn)
+            end
         end
 
         for cpv in node.ctrlPreds
             push!(nodes[cpv].ctrlSuccs, nn)
-        end
-
-        for (lit_num, lit) in enumerate(node.literals[1]) #sort out the function args
-            if isa(lit, Core.SlotNumber)
-                push!(args[lit.id-1].dataSuccs, nn)
-            end
         end
         #might need to add control link updates here
     end
