@@ -385,8 +385,8 @@ struct CDFGNode
     bb::Int #basic block number
     type::DataType
 
-    dataPreds::Array{Array{T,1} where T, 1} # [ssa val (int) or constant, type, position, literal(boolean)]
-    dataSuccs::Vector{Int} # [ssa val] - may need to add position if there are multiple outputs
+    dataPreds::Array{Array{T,1} where T, 1} # [ssa val (int) or constant, type, position, literal or not(boolean)]
+    dataSuccs::Vector{Int} # [ssa val] - may need to add position if there are multiple outputs - TODO work out how to ref generators
     #not sure how helpful this info is in its current state, might need to pull from CFG instead
     ctrlPreds::Vector{Int} #control info, basic blocks
     ctrlSuccs::Vector{Int}
@@ -572,8 +572,12 @@ function get_cdfg(ci::CodeInfo)
             end
         end
 
-        for cpv in node.ctrlPreds
+        for (cpv_num, cpv) in enumerate(node.ctrlPreds)
             push!(nodes[cpv].ctrlSuccs, nn)
+
+            if node.op == :phi #change the ssa values into BBs
+                node.ctrlPreds[cpv_num] = get_bb_num(ci_inf.cfg, cpv)
+            end
         end
         #might need to add control link updates here
     end
