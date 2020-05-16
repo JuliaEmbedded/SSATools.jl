@@ -383,7 +383,7 @@ end
 struct CDFGNode
     op::Any #narrow down the type later - define custom op type
     bb::Int #basic block number
-    type::DataType
+    type::DataType #type of data output by node
 
     dataPreds::Array{Array{T,1} where T, 1} # [ssa val (int) or constant, type, position, literal or not(boolean)]
     dataSuccs::Vector{Int} # [ssa val] - may need to add position if there are multiple outputs - TODO work out how to ref generators
@@ -534,6 +534,16 @@ function CDFGNode(line::Core.GotoNode, linenum::Int, bbnum::Int64, ssatypes::Arr
     ds=Int[]
     cp=[]
     cs=[]#[line.label]
+    return CDFGNode(op, bb, ssatypes[linenum], dp, ds, cp, cs)
+end
+
+function CDFGNode(line::Nothing, linenum::Int, bbnum::Int64, ssatypes::Array{Any, 1}, slottypes::Array{Any, 1})
+    op=:nth
+    bb= bbnum
+    dp=[[],[],[],[]]
+    ds=Int[]
+    cp=[]
+    cs=[]
     return CDFGNode(op, bb, ssatypes[linenum], dp, ds, cp, cs)
 end
 
