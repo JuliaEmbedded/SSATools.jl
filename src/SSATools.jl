@@ -610,13 +610,13 @@ function cfg_to_lightgraph(ci::CodeInfo)
 end
 
 function cfg_to_lightgraph(cfg::Core.Compiler.CFG)
-    cfg = LightGraphs.SimpleDiGraph(length(cfg.blocks))
+    cfg_lg = LightGraphs.SimpleDiGraph(length(cfg.blocks))
 
     for (block_num, block) in enumerate(cfg.blocks)
-        map(x -> LightGraphs.add_edge!(cfg, block_num, x), block.succs)
+        map(x -> LightGraphs.add_edge!(cfg_lg, block_num, x), block.succs)
     end
 
-    return cfg
+    return cfg_lg
 end
 
 function disp_cdfg(cdfg::CDFG)
