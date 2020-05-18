@@ -424,7 +424,7 @@ function remove_sext_64!(ci::CodeInfo)
     for (tgt, rpl) in zip(del_list[1], del_list[2])
         ci_ssa_replace!(ci, tgt, rpl)
     end
-    for del in del_list[1]
+    for del in reverse(del_list[1])
         ci_delete!(ci, del)
     end
     return del_list
