@@ -7,7 +7,7 @@ module SSATools
     #function walking
     #turn that back in to an anon function that can be evaluated
 
-export ci_to_f, disp_cfg, CDFG, get_cdfg
+export ci_to_f, cfg_to_lightgraph, CDFG, get_cdfg
 
 using LightGraphs, MetaGraphs, LinearAlgebra, MacroTools #,Gadfly, GraphPlot
 using Core.Compiler: CodeInfo, SlotNumber
@@ -583,7 +583,7 @@ function get_cdfg(ci::CodeInfo)
         end
 
         for (cpv_num, cpv) in enumerate(node.ctrlPreds)
-            push!(nodes[cpv].ctrlSuccs, nn)
+            push!(nodes[cpv].ctrlSuccs, nn) #TODO fix for nothing nodes
 
             if node.op == :phi #change the ssa values into BBs
                 node.ctrlPreds[cpv_num] = get_bb_num(ci_inf.cfg, cpv)
@@ -596,13 +596,23 @@ function get_cdfg(ci::CodeInfo)
 end
 
 #graph visualisation tools
-disp_cfg(ci_p::Pair) = disp_cfg(ci_p[1]::CodeInfo)
+cfg_to_lightgraph(ci_p::Pair) = cfg_to_lightgraph(ci_p[1]::CodeInfo)
 
-function disp_cfg(ci::CodeInfo)
+function cfg_to_lightgraph(ci::CodeInfo)
     ci_inf = Core.Compiler.inflate_ir(ci)
     cfg = LightGraphs.SimpleDiGraph(length(ci_inf.cfg.blocks))
 
     for (block_num, block ) in enumerate(ci_inf.cfg.blocks)
+        map(x -> LightGraphs.add_edge!(cfg, block_num, x), block.succs)
+    end
+
+    return cfg
+end
+
+function cfg_to_lightgraph(cfg::Core.Compiler.CFG)
+    cfg = LightGraphs.SimpleDiGraph(length(cfg.blocks))
+
+    for (block_num, block) in enumerate(cfg.blocks)
         map(x -> LightGraphs.add_edge!(cfg, block_num, x), block.succs)
     end
 
