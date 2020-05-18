@@ -229,6 +229,44 @@ function ci_delete!(cicp::CodeInfo, pos::Int; preserve_branch=false)
     end
 end
 
+function ci_ssa_replace!(cicp::CodeInfo, ssa_tgt::Int, ssa_rpl::Int)
+    for (i, line) in enumerate(cicp.code)
+        if isa(line, Expr)
+            if line.head == :gotoifnot
+                if isa(line.args[1], Core.SSAValue)
+                    line.args[1] = (line.args[1].id == ssa_tgt) ? Core.SSAValue(ssa_rpl) : line.args[1]
+                end
+                #line.args[2] = (line.args[2] > ssa_tgt) ? (line.args[2] - 1) : line.args[2]
+            else
+                for (j,arg) in enumerate(line.args)
+                    if isa(arg, Core.SSAValue)
+                        if arg.id == ssa_tgt
+                            line.args[j] = Core.SSAValue(ssa_rpl)
+                        end
+                    end
+                end
+            end
+        elseif isa(line, Core.GotoNode)
+            #if line.label == ssa_tgt
+            #    cicp.code[i] = Core.GotoNode(line.label - 1)
+            #end
+        elseif isa(line, Core.PhiNode)
+            #println("edges: ", line.edges, " values: ", line.values)
+            #rpl_edges = Any[  (ssa >= ssa_tgt) ?
+            #                (ssa - 1) : ssa
+            #                for ssa in line.edges]
+            rpl_values = Any[ (isa(val, Core.SSAValue)) ?
+                            ((val.id == ssa_tgt) ? Core.SSAValue(ssa_rpl) : val) : val
+                            for val in line.values]
+            cicp.code[i] = Core.PhiNode(line.edges, rpl_values)
+        elseif isa(line, Nothing)
+        else
+            println("type: ", typeof(line), " line: ", line)
+            error()
+        end
+    end
+end
+
 dummy() = return
 
 function slots!(ci::CodeInfo)
@@ -361,6 +399,35 @@ function ci_to_f(ci::CodeInfo, nargs::Int64)
     @eval @generated function $(gensym())($([Symbol(:arg, i) for i = 1:nargs]...))
         return $ci_eval
     end
+end
+
+#CodeInfo Passes
+function remove_sext_64!(ci::CodeInfo)
+
+    del_list = [[], []]
+    for (line_num, line) in enumerate(ci.code)
+        if isa(line, Core.Expr) && line.head == :call
+            if line.args[1].name == :sext_int && ci.ssavaluetypes[line_num] == Core.Int64
+                push!(del_list[1], line_num)
+                #arg 2 is the target type, arg 3 is the SSA, constant or arg
+                if isa(line.args[3], Core.SSAValue)
+                    push!(del_list[2], line.args[3].id)
+                elseif isa(Core.SlotNumber)
+                    error("slots, not currently supported")
+                else #constant
+                    error("constants, not currently supported")
+                end
+            end
+        end
+    end
+
+    for (tgt, rpl) in zip(del_list[1], del_list[2])
+        ci_ssa_replace!(ci, tgt, rpl)
+    end
+    for del in del_list[1]
+        ci_delete!(ci, del)
+    end
+    return del_list
 end
 
 #CDFGArg struct - contains the arguments to a function
